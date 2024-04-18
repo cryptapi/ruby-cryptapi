@@ -5,7 +5,33 @@ require 'uri'
 require 'json'
 
 module CryptAPI
-  class Error < StandardError; end
+  class APIError < StandardError
+    attr_reader :status_code
+
+    def initialize(message, status_code)
+      super(message)
+      @status_code = status_code
+    end
+
+    def self.from_status_code(status_code, message)
+      case status_code
+      when 400
+        new("Bad Request: #{message}", 400)
+      when 401
+        new("Unauthorized: #{message}", 401)
+      when 403
+        new("Forbidden: #{message}", 403)
+      when 404
+        new("Not Found: #{message}", 404)
+      when 500
+        new("Internal Server Error", 500)
+      else
+        new("Unexpected Error: #{message}", status_code)
+      end
+    end
+  end
+
+  class CallbackURLMissing < StandardError; end
 
   VERSION = "1.0.0.beta"
 
@@ -14,24 +40,20 @@ module CryptAPI
 
   class API
     def initialize(coin, own_address, callback_url, parameters: {}, ca_params: {})
-      raise 'Callback URL Missing' if callback_url.nil?
+      raise CryptAPI::CallbackURLMissing, 'Provide your callback URL' if callback_url.nil?
 
-      @callback_url = callback_url
+      _cb = URI::parse(callback_url)
+
+      @callback_url = URI::HTTPS.build(
+        host: _cb.host,
+        path: _cb.path,
+        query: URI.encode_www_form(parameters)
+      )
       @coin = coin
       @own_address = own_address
       @parameters = parameters
       @ca_params = ca_params
       @payment_address = ''
-
-      if parameters
-        _cb = URI::parse(callback_url)
-
-        @callback_url = URI::HTTPS.build(
-          host: _cb.host,
-          path: _cb.path,
-          query: URI.encode_www_form(parameters)
-        )
-      end
     end
 
     def get_address
@@ -159,8 +181,15 @@ module CryptAPI
   def self.process_request_get(coin, endpoint, params)
     coin = coin.nil? ? '' : "#{coin.tr('_', '/')}/"
 
-    response = Net::HTTP.get(URI.parse("#{CRYPTAPI_URL}#{coin}#{endpoint}/?#{URI.encode_www_form(params)}"))
+    response = Net::HTTP.get_response(URI.parse("#{CRYPTAPI_URL}#{coin}#{endpoint}/?#{URI.encode_www_form(params)}"))
 
-    JSON.parse(response)
+    response_obj = JSON.parse(response.body)
+
+    if !response.is_a?(Net::HTTPSuccess) || response_obj['status'] == 'error'
+      error = APIError.from_status_code(response.code.to_i, response_obj['error'])
+      raise error
+    end
+
+    response_obj
   end
 end
