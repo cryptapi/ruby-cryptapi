@@ -7,7 +7,7 @@ require 'json'
 module CryptAPI
   class Error < StandardError; end
 
-  VERSION = "1.0.0"
+  VERSION = "1.0.0.beta"
 
   CRYPTAPI_URL = 'https://api.cryptapi.io/'
   CRYPTAPI_HOST = 'api.cryptapi.io'
